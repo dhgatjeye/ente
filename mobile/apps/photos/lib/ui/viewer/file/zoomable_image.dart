@@ -87,7 +87,6 @@ class _ZoomableImageState extends State<ZoomableImage> {
   bool _firedOnReady = false;
   bool _interactionLocked = false;
   Size? _layoutSize;
-  double? _layoutDevicePixelRatio;
   Size? _finalImageSourceSize;
   Size? _finalImageDecodedSize;
   bool _layoutReloadScheduled = false;
@@ -252,7 +251,6 @@ class _ZoomableImageState extends State<ZoomableImage> {
         final nextDevicePixelRatio = MediaQuery.devicePixelRatioOf(context);
         _scheduleLayoutDecodeRefresh(nextLayoutSize, nextDevicePixelRatio);
         _layoutSize = nextLayoutSize;
-        _layoutDevicePixelRatio = nextDevicePixelRatio;
         return _buildContent(context);
       },
     );
@@ -267,9 +265,7 @@ class _ZoomableImageState extends State<ZoomableImage> {
     if (!_loadedFinalImage ||
         sourceSize == null ||
         decodedSize == null ||
-        _layoutReloadScheduled ||
-        (_layoutSize == nextLayoutSize &&
-            _layoutDevicePixelRatio == nextDevicePixelRatio)) {
+        _layoutReloadScheduled) {
       return;
     }
     final requiredSize = imageDecodeSizeForDisplay(
@@ -394,8 +390,10 @@ class _ZoomableImageState extends State<ZoomableImage> {
                       if (mounted) {
                         setState(() {
                           _thumbnailImageProvider = imageProvider;
-                          _imageProvider = imageProvider;
                           _loadedSmallThumbnail = true;
+                          if (!_loadedFinalImage) {
+                            _imageProvider = imageProvider;
+                          }
                         });
                         _notifyReadyOnce();
                       }
@@ -513,18 +511,18 @@ class _ZoomableImageState extends State<ZoomableImage> {
     ImageProvider imageProvider,
     BuildContext context,
   ) {
-    if (mounted && !_loadedFinalImage) {
-      precacheImage(imageProvider, context).then((value) {
-        if (mounted && !_loadedFinalImage) {
-          setState(() {
-            _thumbnailImageProvider = imageProvider;
-            _imageProvider = imageProvider;
-            _loadedLargeThumbnail = true;
-          });
-          _notifyReadyOnce();
+    if (!mounted) return;
+    precacheImage(imageProvider, context).then((value) {
+      if (!mounted) return;
+      setState(() {
+        _thumbnailImageProvider = imageProvider;
+        _loadedLargeThumbnail = true;
+        if (!_loadedFinalImage) {
+          _imageProvider = imageProvider;
         }
       });
-    }
+      _notifyReadyOnce();
+    });
   }
 
   void _onFileLoaded(File file) {
