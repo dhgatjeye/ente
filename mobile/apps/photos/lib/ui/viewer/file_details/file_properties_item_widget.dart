@@ -30,13 +30,30 @@ class FilePropertiesItemWidget extends StatefulWidget {
 
 class _FilePropertiesItemWidgetState extends State<FilePropertiesItemWidget> {
   Future<List<Widget>>? _subtitleSectionFuture;
+  Object? _cachedExifResolution;
+  Object? _cachedExifMegaPixels;
+
+  @override
+  void initState() {
+    super.initState();
+    _rememberExifDimensions();
+  }
 
   @override
   void didUpdateWidget(covariant FilePropertiesItemWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.file.tag != widget.file.tag) {
+    final exifDimensionsChanged =
+        _cachedExifResolution != widget.exifData["resolution"] ||
+        _cachedExifMegaPixels != widget.exifData["megaPixels"];
+    if (oldWidget.file.tag != widget.file.tag || exifDimensionsChanged) {
       _subtitleSectionFuture = null;
     }
+    _rememberExifDimensions();
+  }
+
+  void _rememberExifDimensions() {
+    _cachedExifResolution = widget.exifData["resolution"];
+    _cachedExifMegaPixels = widget.exifData["megaPixels"];
   }
 
   @override

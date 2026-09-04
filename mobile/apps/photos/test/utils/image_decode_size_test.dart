@@ -1,5 +1,4 @@
-import 'dart:ui';
-
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:photos/utils/image_decode_size.dart';
 
@@ -43,6 +42,22 @@ void main() {
 
       expect(result, isNotNull);
       expect(result!.width * result.height, closeTo(8 * 1000 * 1000, 5000));
+    });
+
+    test('uses the covered viewport for cover mode', () {
+      final result = imageDecodeSizeForDisplay(
+        sourceWidth: 8000,
+        sourceHeight: 1000,
+        viewportSize: const Size(400, 400),
+        devicePixelRatio: 1,
+        maxDecodedPixels: lowMemoryImageDecodePixelLimit,
+        fit: BoxFit.cover,
+      );
+
+      expect(result, isNotNull);
+      expect(result!.width, closeTo(6400, 2));
+      expect(result.height, closeTo(800, 2));
+      expect(result.width * result.height, lessThan(8 * 1000 * 1000));
     });
   });
 }

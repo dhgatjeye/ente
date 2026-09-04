@@ -86,6 +86,7 @@ class _ZoomableImageState extends State<ZoomableImage> {
   // for the original.
   bool _firedOnReady = false;
   bool _interactionLocked = false;
+  Size? _layoutSize;
   final _imageZoomController = ImageZoomController();
   late final StreamSubscription<ResetZoomOfPhotoView> _resetZoomSubscription;
   late final StreamSubscription<RetryFailedImageLoadEvent>
@@ -159,10 +160,15 @@ class _ZoomableImageState extends State<ZoomableImage> {
   @override
   void didUpdateWidget(covariant ZoomableImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.activeItemIndexListenable !=
-        widget.activeItemIndexListenable) {
+    final listenableChanged =
+        oldWidget.activeItemIndexListenable != widget.activeItemIndexListenable;
+    if (listenableChanged) {
       oldWidget.activeItemIndexListenable?.removeListener(_onActiveItemChanged);
       widget.activeItemIndexListenable?.addListener(_onActiveItemChanged);
+    }
+    if (listenableChanged ||
+        oldWidget.isActive != widget.isActive ||
+        oldWidget.itemIndex != widget.itemIndex) {
       _onActiveItemChanged();
     }
   }
@@ -228,6 +234,18 @@ class _ZoomableImageState extends State<ZoomableImage> {
 
   @override
   Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final constrainedSize = constraints.biggest;
+        _layoutSize = constrainedSize.isFinite && !constrainedSize.isEmpty
+            ? constrainedSize
+            : MediaQuery.sizeOf(context);
+        return _buildContent(context);
+      },
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     if (_photo.isRemoteOnlyFile) {
       _loadNetworkImage();
     } else {
@@ -572,9 +590,10 @@ class _ZoomableImageState extends State<ZoomableImage> {
     return imageDecodeSizeForDisplay(
       sourceWidth: sourceDimensions.width,
       sourceHeight: sourceDimensions.height,
-      viewportSize: mediaQuery.size,
+      viewportSize: _layoutSize ?? mediaQuery.size,
       devicePixelRatio: mediaQuery.devicePixelRatio,
       maxDecodedPixels: _maxImagePixels,
+      fit: widget.shouldCover ? BoxFit.cover : BoxFit.contain,
     );
   }
 

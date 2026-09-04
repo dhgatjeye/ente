@@ -1,5 +1,6 @@
 import 'dart:math';
-import 'dart:ui';
+
+import 'package:flutter/painting.dart';
 
 const int lowMemoryImageDecodePixelLimit = 8 * 1000 * 1000;
 const int defaultImageDecodePixelLimit = 16 * 1000 * 1000;
@@ -17,6 +18,7 @@ Size? imageDecodeSizeForDisplay({
   required double devicePixelRatio,
   required int maxDecodedPixels,
   double zoomReserve = 2,
+  BoxFit fit = BoxFit.contain,
 }) {
   if (sourceWidth <= 0 ||
       sourceHeight <= 0 ||
@@ -29,10 +31,11 @@ Size? imageDecodeSizeForDisplay({
   }
 
   final sourcePixels = sourceWidth * sourceHeight;
-  final fittedScale = min(
-    viewportSize.width / sourceWidth,
-    viewportSize.height / sourceHeight,
-  );
+  final widthScale = viewportSize.width / sourceWidth;
+  final heightScale = viewportSize.height / sourceHeight;
+  final fittedScale = fit == BoxFit.cover
+      ? max(widthScale, heightScale)
+      : min(widthScale, heightScale);
   final displayScale = min(1.0, fittedScale * devicePixelRatio * zoomReserve);
   final memoryScale = min(1.0, sqrt(maxDecodedPixels / sourcePixels));
   final decodeScale = min(displayScale, memoryScale);
