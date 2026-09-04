@@ -29,6 +29,16 @@ class FilePropertiesItemWidget extends StatefulWidget {
 }
 
 class _FilePropertiesItemWidgetState extends State<FilePropertiesItemWidget> {
+  Future<List<Widget>>? _subtitleSectionFuture;
+
+  @override
+  void didUpdateWidget(covariant FilePropertiesItemWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.file.tag != widget.file.tag) {
+      _subtitleSectionFuture = null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.componentColors;
@@ -44,7 +54,10 @@ class _FilePropertiesItemWidgetState extends State<FilePropertiesItemWidget> {
       title:
           path.basenameWithoutExtension(widget.file.displayName) +
           path.extension(widget.file.displayName).toUpperCase(),
-      subtitleSection: _subTitleSection(),
+      // Parent EXIF updates rebuild this widget. Keep the already completed
+      // properties lookup so the row does not flash a spinner and re-read the
+      // same local file on every rebuild.
+      subtitleSection: _subtitleSectionFuture ??= _subTitleSection(),
       editOnTap:
           widget.file.uploadedFileID == null ||
               widget.file.ownerID != widget.currentUserID ||
