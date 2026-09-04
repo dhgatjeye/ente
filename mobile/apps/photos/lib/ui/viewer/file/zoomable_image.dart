@@ -673,7 +673,7 @@ class _ZoomableImageState extends State<ZoomableImage> {
   void _finishFinalImageLoad({bool retryIfEligible = false}) {
     if (!mounted) return;
     _loadingFinalImage = false;
-    if (!_loadedFinalImage) {
+    if (!_loadedFinalImage && !_showingThumbnailFallback) {
       _convertToSupportedFormat = false;
     }
     final shouldRetry =
@@ -687,11 +687,14 @@ class _ZoomableImageState extends State<ZoomableImage> {
   Future<void> _loadHeicWithRust(File file) async {
     final imageProvider = await _tryDecodeHeicWithRust(file);
     if (imageProvider != null) {
-      await _tryDisplayRustDecodedImage(
+      final didDisplay = await _tryDisplayRustDecodedImage(
         file,
         imageProvider,
         fallbackToSupportedFormatOnFailure: true,
       );
+      if (!didDisplay && !_convertToSupportedFormat) {
+        _finishFinalImageLoad(retryIfEligible: true);
+      }
       return;
     }
 
@@ -792,8 +795,9 @@ class _ZoomableImageState extends State<ZoomableImage> {
           identical(_finalImageProvider, imageProvider) &&
           !_loadedFinalImage) {
         await _updateViewWithFinalImage(imageProvider, file);
+        return true;
       }
-      return true;
+      return false;
     } catch (e) {
       _logger.warning(
         "Flutter failed to decode Rust JPEG bytes for ${_photo.generatedID}: $e",
