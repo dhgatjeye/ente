@@ -32,6 +32,7 @@ class _FilePropertiesItemWidgetState extends State<FilePropertiesItemWidget> {
   Future<List<Widget>>? _subtitleSectionFuture;
   Object? _cachedExifResolution;
   Object? _cachedExifMegaPixels;
+  Color? _cachedTextColor;
 
   @override
   void initState() {
@@ -54,6 +55,16 @@ class _FilePropertiesItemWidgetState extends State<FilePropertiesItemWidget> {
   void _rememberExifDimensions() {
     _cachedExifResolution = widget.exifData["resolution"];
     _cachedExifMegaPixels = widget.exifData["megaPixels"];
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final textColor = context.componentColors.textLight;
+    if (_cachedTextColor != null && _cachedTextColor != textColor) {
+      _subtitleSectionFuture = null;
+    }
+    _cachedTextColor = textColor;
   }
 
   @override

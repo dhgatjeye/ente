@@ -87,6 +87,10 @@ class _ZoomableImageState extends State<ZoomableImage> {
   bool _firedOnReady = false;
   bool _interactionLocked = false;
   Size? _layoutSize;
+  double? _layoutDevicePixelRatio;
+  Size? _finalImageSourceSize;
+  Size? _finalImageDecodedSize;
+  bool _layoutReloadScheduled = false;
   final _imageZoomController = ImageZoomController();
   late final StreamSubscription<ResetZoomOfPhotoView> _resetZoomSubscription;
   late final StreamSubscription<RetryFailedImageLoadEvent>
@@ -199,12 +203,16 @@ class _ZoomableImageState extends State<ZoomableImage> {
   }
 
   void _discardFinalImage() {
+    final hasInFlightLoad = _loadingFinalImage;
     _finalLoadGeneration++;
     final provider = _finalImageProvider;
     _finalImageProvider = null;
     _loadedFinalImage = false;
-    _loadingFinalImage = false;
-    _convertToSupportedFormat = false;
+    _finalImageSourceSize = null;
+    _finalImageDecodedSize = null;
+    if (!hasInFlightLoad) {
+      _convertToSupportedFormat = false;
+    }
     _imageProvider = _thumbnailImageProvider;
     if (provider != null) {
       unawaited(provider.evict());
@@ -237,12 +245,53 @@ class _ZoomableImageState extends State<ZoomableImage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final constrainedSize = constraints.biggest;
-        _layoutSize = constrainedSize.isFinite && !constrainedSize.isEmpty
+        final nextLayoutSize =
+            constrainedSize.isFinite && !constrainedSize.isEmpty
             ? constrainedSize
             : MediaQuery.sizeOf(context);
+        final nextDevicePixelRatio = MediaQuery.devicePixelRatioOf(context);
+        _scheduleLayoutDecodeRefresh(nextLayoutSize, nextDevicePixelRatio);
+        _layoutSize = nextLayoutSize;
+        _layoutDevicePixelRatio = nextDevicePixelRatio;
         return _buildContent(context);
       },
     );
+  }
+
+  void _scheduleLayoutDecodeRefresh(
+    Size nextLayoutSize,
+    double nextDevicePixelRatio,
+  ) {
+    final sourceSize = _finalImageSourceSize;
+    final decodedSize = _finalImageDecodedSize;
+    if (!_loadedFinalImage ||
+        sourceSize == null ||
+        decodedSize == null ||
+        _layoutReloadScheduled ||
+        (_layoutSize == nextLayoutSize &&
+            _layoutDevicePixelRatio == nextDevicePixelRatio)) {
+      return;
+    }
+    final requiredSize = imageDecodeSizeForDisplay(
+      sourceWidth: sourceSize.width.round(),
+      sourceHeight: sourceSize.height.round(),
+      viewportSize: nextLayoutSize,
+      devicePixelRatio: nextDevicePixelRatio,
+      maxDecodedPixels: _maxImagePixels,
+      fit: widget.shouldCover ? BoxFit.cover : BoxFit.contain,
+    );
+    final effectiveRequiredSize = requiredSize ?? sourceSize;
+    if (effectiveRequiredSize.width <= decodedSize.width + 1 &&
+        effectiveRequiredSize.height <= decodedSize.height + 1) {
+      return;
+    }
+    _layoutReloadScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _layoutReloadScheduled = false;
+      if (!mounted || !_loadedFinalImage || !_isDecodeEligible) return;
+      _discardFinalImage();
+      setState(() {});
+    });
   }
 
   Widget _buildContent(BuildContext context) {
@@ -476,7 +525,7 @@ class _ZoomableImageState extends State<ZoomableImage> {
 
   void _onFileLoaded(File file) {
     if (!mounted || !_isDecodeEligible) {
-      _loadingFinalImage = false;
+      _finishFinalImageLoad(retryIfEligible: true);
       return;
     }
     // Android's HEIC decoder can produce a glitched image without throwing.
@@ -530,6 +579,7 @@ class _ZoomableImageState extends State<ZoomableImage> {
     if (!mounted ||
         !_isDecodeEligible ||
         loadGeneration != _finalLoadGeneration) {
+      _finishFinalImageLoad(retryIfEligible: true);
       return;
     }
     final decodeSize = _decodeSizeForDisplay(sourceDimensions);
@@ -550,28 +600,47 @@ class _ZoomableImageState extends State<ZoomableImage> {
     }
 
     if (mounted && _isDecodeEligible) {
+      final sourceSize = sourceDimensions == null
+          ? null
+          : Size(
+              sourceDimensions.width.toDouble(),
+              sourceDimensions.height.toDouble(),
+            );
       _finalImageProvider = imageProvider;
       unawaited(
         precacheImage(
-          imageProvider,
-          context,
-          onError: (exception, s) async {
-            _logger.warning(
-              "Failed to load image ${_photo.displayName} with error: $exception, attempting fallback",
-            );
-            if (mounted && _isDecodeEligible) {
-              unawaited(_loadInSupportedFormat(file, exception));
-            }
-          },
-        ).then((value) {
-          if (mounted &&
-              _isDecodeEligible &&
-              identical(_finalImageProvider, imageProvider) &&
-              !_loadedFinalImage &&
-              !_convertToSupportedFormat) {
-            _updateViewWithFinalImage(imageProvider, file);
-          }
-        }).catchError((Object _) {}),
+              imageProvider,
+              context,
+              onError: (exception, s) async {
+                _logger.warning(
+                  "Failed to load image ${_photo.displayName} with error: $exception, attempting fallback",
+                );
+                if (mounted && _isDecodeEligible) {
+                  unawaited(_loadInSupportedFormat(file, exception));
+                }
+              },
+            )
+            .then((value) {
+              if (mounted &&
+                  _isDecodeEligible &&
+                  identical(_finalImageProvider, imageProvider) &&
+                  !_loadedFinalImage &&
+                  !_convertToSupportedFormat) {
+                _updateViewWithFinalImage(
+                  imageProvider,
+                  file,
+                  sourceSize: sourceSize,
+                  decodedSize: decodeSize ?? sourceSize,
+                );
+              } else if (!_convertToSupportedFormat) {
+                _finishFinalImageLoad(retryIfEligible: true);
+              }
+            })
+            .catchError((Object _) {
+              if (!_convertToSupportedFormat) {
+                _finishFinalImageLoad(retryIfEligible: true);
+              }
+            }),
       );
     }
   }
@@ -598,11 +667,21 @@ class _ZoomableImageState extends State<ZoomableImage> {
   }
 
   void _onFinalImageFetchFailed() {
+    _finishFinalImageLoad();
+  }
+
+  void _finishFinalImageLoad({bool retryIfEligible = false}) {
+    if (!mounted) return;
     _loadingFinalImage = false;
-    if (_pendingFinalImageRetry && mounted && !_loadedFinalImage) {
-      _pendingFinalImageRetry = false;
-      setState(() {});
+    if (!_loadedFinalImage) {
+      _convertToSupportedFormat = false;
     }
+    final shouldRetry =
+        !_loadedFinalImage &&
+        !_showingThumbnailFallback &&
+        (_pendingFinalImageRetry || (retryIfEligible && _isDecodeEligible));
+    _pendingFinalImageRetry = false;
+    if (shouldRetry) setState(() {});
   }
 
   Future<void> _loadHeicWithRust(File file) async {
@@ -627,18 +706,25 @@ class _ZoomableImageState extends State<ZoomableImage> {
 
   Future<void> _updateViewWithFinalImage(
     ImageProvider imageProvider,
-    File file,
-  ) async {
+    File file, {
+    Size? sourceSize,
+    Size? decodedSize,
+  }) async {
     if (!mounted || !_isDecodeEligible) {
       if (identical(_finalImageProvider, imageProvider)) {
         _discardFinalImage();
       }
+      _finishFinalImageLoad(retryIfEligible: true);
       return;
     }
     setState(() {
       _finalImageProvider = imageProvider;
       _imageProvider = imageProvider;
       _loadedFinalImage = true;
+      _loadingFinalImage = false;
+      _pendingFinalImageRetry = false;
+      _finalImageSourceSize = sourceSize;
+      _finalImageDecodedSize = decodedSize;
       _logger.info("Final image loaded");
     });
     _notifyReadyOnce();
@@ -735,7 +821,7 @@ class _ZoomableImageState extends State<ZoomableImage> {
     bool skipRustDecoder = false,
   }) async {
     if (!mounted || !_isDecodeEligible) {
-      _loadingFinalImage = false;
+      _finishFinalImageLoad(retryIfEligible: true);
       return;
     }
     // FlutterImageCompress crashes on RAW files. Show the thumbnail instead.
@@ -755,6 +841,7 @@ class _ZoomableImageState extends State<ZoomableImage> {
         );
         _notifyReadyOnce();
       }
+      _finishFinalImageLoad();
       return;
     }
 
@@ -775,11 +862,16 @@ class _ZoomableImageState extends State<ZoomableImage> {
       if (didDisplayRustImage) {
         return;
       }
+      if (!mounted || !_isDecodeEligible) {
+        _finishFinalImageLoad(retryIfEligible: true);
+        return;
+      }
     }
 
     Uint8List? compressedFile;
     final sourceDimensions = await _sourceDimensions(file);
     if (!mounted || !_isDecodeEligible) {
+      _finishFinalImageLoad(retryIfEligible: true);
       return;
     }
     final decodeSize = _decodeSizeForDisplay(sourceDimensions);
@@ -788,21 +880,34 @@ class _ZoomableImageState extends State<ZoomableImage> {
         "Compressing ${sourceDimensions?.width}x${sourceDimensions?.height} to "
         "${decodeSize.width.toInt()}x${decodeSize.height.toInt()} for display",
       );
-      compressedFile = await FlutterImageCompress.compressWithFile(
-        file.path,
-        minWidth: decodeSize.width.round(),
-        minHeight: decodeSize.height.round(),
-        quality: 85,
-      );
+      try {
+        compressedFile = await FlutterImageCompress.compressWithFile(
+          file.path,
+          minWidth: decodeSize.width.round(),
+          minHeight: decodeSize.height.round(),
+          quality: 85,
+        );
+      } catch (e, s) {
+        _logger.warning("Failed to compress ${_photo.displayName}", e, s);
+        _finishFinalImageLoad();
+        return;
+      }
     } else {
-      compressedFile = await FlutterImageCompress.compressWithFile(
-        file.path,
-        minHeight: 8000,
-        minWidth: 8000,
-      );
+      try {
+        compressedFile = await FlutterImageCompress.compressWithFile(
+          file.path,
+          minHeight: 8000,
+          minWidth: 8000,
+        );
+      } catch (e, s) {
+        _logger.warning("Failed to compress ${_photo.displayName}", e, s);
+        _finishFinalImageLoad();
+        return;
+      }
     }
 
     if (!mounted || !_isDecodeEligible) {
+      _finishFinalImageLoad(retryIfEligible: true);
       return;
     }
 
@@ -820,10 +925,25 @@ class _ZoomableImageState extends State<ZoomableImage> {
               if (mounted &&
                   _isDecodeEligible &&
                   identical(_finalImageProvider, imageProvider)) {
-                _updateViewWithFinalImage(imageProvider, file);
+                final sourceSize = sourceDimensions == null
+                    ? null
+                    : Size(
+                        sourceDimensions.width.toDouble(),
+                        sourceDimensions.height.toDouble(),
+                      );
+                _updateViewWithFinalImage(
+                  imageProvider,
+                  file,
+                  sourceSize: sourceSize,
+                  decodedSize: decodeSize ?? sourceSize,
+                );
+              } else {
+                _finishFinalImageLoad(retryIfEligible: true);
               }
             })
-            .catchError((Object _) {}),
+            .catchError((Object _) {
+              _finishFinalImageLoad();
+            }),
       );
     } else {
       _logger.severe(
@@ -840,6 +960,7 @@ class _ZoomableImageState extends State<ZoomableImage> {
         );
         _notifyReadyOnce();
       }
+      _finishFinalImageLoad();
     }
   }
 }

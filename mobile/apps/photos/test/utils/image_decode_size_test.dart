@@ -59,5 +59,27 @@ void main() {
       expect(result.height, closeTo(800, 2));
       expect(result.width * result.height, lessThan(8 * 1000 * 1000));
     });
+
+    test('requests a larger sample when the viewport expands', () {
+      final initial = imageDecodeSizeForDisplay(
+        sourceWidth: 8000,
+        sourceHeight: 6000,
+        viewportSize: const Size(300, 600),
+        devicePixelRatio: 1,
+        maxDecodedPixels: defaultImageDecodePixelLimit,
+      );
+      final expanded = imageDecodeSizeForDisplay(
+        sourceWidth: 8000,
+        sourceHeight: 6000,
+        viewportSize: const Size(1200, 2400),
+        devicePixelRatio: 1,
+        maxDecodedPixels: defaultImageDecodePixelLimit,
+      );
+
+      expect(initial, isNotNull);
+      expect(expanded, isNotNull);
+      expect(expanded!.width, greaterThan(initial!.width));
+      expect(expanded.height, greaterThan(initial.height));
+    });
   });
 }
