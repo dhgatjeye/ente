@@ -417,7 +417,10 @@ class _ZoomableImageState extends State<ZoomableImage> {
             });
       }
     }
-    if (_isDecodeEligible && !_loadedFinalImage && !_loadingFinalImage) {
+    if (_isDecodeEligible &&
+        !_loadedFinalImage &&
+        !_loadingFinalImage &&
+        !_showingThumbnailFallback) {
       _loadingFinalImage = true;
       getFileFromServer(_photo)
           .then((file) {
@@ -474,6 +477,7 @@ class _ZoomableImageState extends State<ZoomableImage> {
     if (_isDecodeEligible &&
         !_loadingFinalImage &&
         !_loadedFinalImage &&
+        !_showingThumbnailFallback &&
         !_photo.isDeviceTrash) {
       _loadingFinalImage = true;
       getFile(
