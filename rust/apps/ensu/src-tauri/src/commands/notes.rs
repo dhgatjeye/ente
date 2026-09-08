@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
-use std::fs::{self, File, OpenOptions};
 #[cfg(unix)]
-use std::os::fd::AsRawFd;
+use std::fs::TryLockError;
+use std::fs::{self, File, OpenOptions};
 #[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 #[cfg(windows)]
@@ -937,7 +937,9 @@ fn report_index_error(
                     .is_ok_and(|collection| source_root_is_available(&collection.source_root))
         });
     let mut runtime = state.runtime(collection_id);
-    runtime.indexing_progress = None;
+    if !cancelled {
+        runtime.indexing_progress = None;
+    }
     runtime.status = if cancelled || superseded_file_error {
         NotesCollectionStatusDto::Pending
     } else if unavailable {
@@ -1024,7 +1026,8 @@ pub async fn notes_index_collection(
     if !matches!(
         runtime.status,
         NotesCollectionStatusDto::Indexing | NotesCollectionStatusDto::Updating
-    ) {
+    ) && runtime.indexing_progress.is_none()
+    {
         runtime.indexing_progress = Some(0);
     }
     runtime.status = if had_index {
@@ -1230,16 +1233,10 @@ fn acquire_notes_ownership(notes_directory: &Path) -> Result<File, ApiError> {
         .map_err(notes_ownership_open_error)?;
 
     #[cfg(unix)]
-    {
-        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if result != 0 {
-            let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::WouldBlock {
-                return Err(notes_in_use_error());
-            }
-            return Err(io_error(error));
-        }
-    }
+    file.try_lock().map_err(|error| match error {
+        TryLockError::WouldBlock => notes_in_use_error(),
+        TryLockError::Error(error) => io_error(error),
+    })?;
 
     Ok(file)
 }

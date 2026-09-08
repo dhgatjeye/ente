@@ -20,8 +20,6 @@ import {
     clearSpaceFriendsCache,
     confirmCurrentFriendRequest,
     deleteCurrentFriendRequest,
-    isFriendRequestCanceledError,
-    isSpaceFriendLimitError,
     loadCurrentFriendAvatarURL,
     loadCurrentFriendRequests,
     loadCurrentSpaceFriends,
@@ -29,12 +27,17 @@ import {
     loadCurrentSpaceProfilePostsPage,
     loadCurrentUnreadStatus,
     replyToCurrentPost,
+    sendCurrentPoke,
     setCurrentPostLiked,
     type SpaceFriendRequest,
     type SpacePost,
 } from "services/space";
 import { useSpaceAppState } from "state/app-state";
 import { spaceAppBackgroundColor } from "styles/colors";
+import {
+    isFriendRequestCanceledError,
+    isSpaceFriendLimitError,
+} from "utils/friend-errors";
 import { maximumSpaceFriendCount } from "utils/friend-limits";
 import { useSpaceRouter } from "utils/route-transitions";
 import { spaceRoutes } from "utils/routes";
@@ -351,6 +354,27 @@ const Page: React.FC = () => {
                 onLoadFriendPosts={loadCurrentSpaceProfilePostsPage}
                 onLoadPostImage={loadCurrentSpacePostAssetURL}
                 onOpenMessages={() => void router.push(spaceRoutes.messages)}
+                onMessageFriend={(friend) =>
+                    void router.push(
+                        spaceRoutes.message(friend.spaceId ?? friend.id),
+                    )
+                }
+                onPokeFriend={async (friend) => {
+                    if (!profile?.spaceId) throw new Error("Missing space.");
+                    await sendCurrentPoke(
+                        profile.spaceId,
+                        friend.spaceId ?? friend.id,
+                        {
+                            id: profile.spaceId,
+                            spaceId: profile.spaceId,
+                            fullName: profile.fullName,
+                            username: profile.username,
+                            avatarUrl: profile.avatarUrl,
+                            friendsCount: 0,
+                        },
+                        friend,
+                    );
+                }}
                 onOpenFriendRequests={() =>
                     void router.push(spaceRoutes.friends)
                 }
