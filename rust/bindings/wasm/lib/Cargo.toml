@@ -13,14 +13,21 @@ contacts = [
 crypto = []
 crypto-file = ["crypto", "dep:md-5"]
 crypto-seal = ["crypto"]
+locker = ["session", "dep:ente-locker"]
 prelogin = ["accounts", "crypto"]
-session = ["dep:serde", "dep:serde-wasm-bindgen", "dep:tsify"]
+session = [
+    "dep:ente-accounts",
+    "dep:serde",
+    "dep:serde-wasm-bindgen",
+    "dep:tsify",
+]
 
 [dependencies]
 ente-accounts = { workspace = true, optional = true }
 ente-collections = { workspace = true, optional = true }
 ente-contacts = { workspace = true, optional = true }
 ente-core.workspace = true
+ente-locker = { workspace = true, optional = true }
 js-sys.workspace = true
 log.workspace = true
 md-5 = { workspace = true, optional = true }
